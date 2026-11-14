@@ -15,6 +15,7 @@ export class BackroomsEntity {
         this.attackCooldown = 0;
         this.animTime = 0;
         this.grabbedPlayerId = null;
+        this.wasGrabbingMe = false;
 
         this.path = [];
         this.pathTimer = 0;
@@ -231,7 +232,7 @@ export class BackroomsEntity {
         }
         return false;
     }
-    update(dt, player, input, world, building, lighting, gameTime, struggle, isHost = true, allPlayers = null, localPeerId = 'local') {
+    update(dt, player, input, world, building, lighting, gameTime, struggle, isHost = true, allPlayers = null, localPeerId = 'local', onEscapedNet = null) {
         this.animTime += dt;
         if (this.attackCooldown > 0) this.attackCooldown -= dt;
 
@@ -240,35 +241,44 @@ export class BackroomsEntity {
             if (this.afterimages[i].alpha <= 0) this.afterimages.splice(i, 1);
         }
 
-        // На стороне гостя плавно интерполируем координаты монстра от хоста
-        // На стороне гостя плавно интерполируем координаты монстра от хоста
+        // --- ЛОГИКА ГОСТЯ ---
         if (!isHost) {
             if (this.targetX !== undefined && this.targetY !== undefined) {
-                this.x += (this.targetX - this.x) * Math.min(1, 16 * dt);
-                this.y += (this.targetY - this.y) * Math.min(1, 16 * dt);
+                this.x += (this.targetX - this.x) * Math.min(1, 18 * dt);
+                this.y += (this.targetY - this.y) * Math.min(1, 18 * dt);
             }
 
             if (struggle.active) {
                 this.state = 'GRAB';
                 this.x = player.x - Math.cos(this.angle) * 16;
                 this.y = player.y - Math.sin(this.angle) * 16;
+                this.wasGrabbingMe = true;
+                return;
+            }
+
+            if (this.wasGrabbingMe && !struggle.active) {
+                this.wasGrabbingMe = false;
+                this.state = 'STUNNED';
+                this.grabbedPlayerId = null;
+                if (onEscapedNet) onEscapedNet();
                 return;
             }
 
             const distToLocal = Math.hypot(player.x - this.x, player.y - this.y);
             const hostGrabbedMe = (this.state === 'GRAB' && this.grabbedPlayerId === localPeerId);
-            const closeAttack = (this.state === 'CHASE' || this.state === 'STALK' || this.state === 'GRAB') && distToLocal <= this.radius + player.radius + 14;
+            const closeAttack = (this.state === 'CHASE' || this.state === 'GRAB') && distToLocal <= this.radius + player.radius + 16;
 
             if ((hostGrabbedMe || closeAttack) && this.attackCooldown <= 0) {
                 this.state = 'GRAB';
                 this.grabbedPlayerId = localPeerId;
                 this.attackCooldown = 4.0;
+                this.wasGrabbingMe = true;
                 struggle.startGrab();
             }
             return;
         }
 
-        // Выбираем ближайшего живого игрока в комнате в качестве цели
+        // --- ЛОГИКА ХОСТА ---
         const candidates = (Array.isArray(allPlayers) && allPlayers.length !== 0) ? allPlayers : [player];
         let target = player;
         let minTargetDist = Infinity;
@@ -305,8 +315,13 @@ export class BackroomsEntity {
                     this.despawn(target, 35);
                 }
             } else {
+                const victim = candidates.find(p => p.id === this.grabbedPlayerId);
+                if (victim) {
+                    this.x = victim.x - Math.cos(this.angle) * 16;
+                    this.y = victim.y - Math.sin(this.angle) * 16;
+                }
                 this.timer -= dt;
-                if (this.timer <= 0) {
+                if (this.timer <= 0 || !victim) {
                     this.grabbedPlayerId = null;
                     this.despawn(target, 35);
                 }
@@ -479,12 +494,11 @@ export class BackroomsEntity {
 
         if (this.state === 'STARE' || isAngry) {
             ctx.strokeStyle = glowColor;
-            ctx.lineWidth = 1.8;
-            ctx.beginPath();
-            ctx.arc(6, 0, 9, -0.75, 0.75);
-            ctx.stroke();
-        }
-
-        ctx.restore();
-    }
+ctx.lineWidth = 1.8;
+ctx.beginPath();
+ctx.arc(6, 0, 9, -0.75, 0.75);
+ctx.stroke();
+}
+ctx.restore();
+}
 }

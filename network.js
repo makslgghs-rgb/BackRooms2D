@@ -236,6 +236,13 @@ export class P2PNetwork {
             return;
         }
 
+        if (msg.type === 'entity_escaped' && this.isHost) {
+            if (this.callbacks.onEntityEscaped) {
+                this.callbacks.onEntityEscaped();
+            }
+            return;
+        }
+
         if (msg.type === 'structure_update' && this.callbacks.onStructureUpdate) {
             this.callbacks.onStructureUpdate(msg);
             return;
@@ -293,7 +300,6 @@ export class P2PNetwork {
                 });
             }
         }
-
 
         this.pingTimer += dt;
         if (this.pingTimer >= 25) {
