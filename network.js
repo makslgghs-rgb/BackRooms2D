@@ -15,7 +15,6 @@ export class P2PNetwork {
         this.isConnected = false;
         this.statusText = 'Офлайн';
 
-        // Удалённые игроки в текущей комнате: Map<peerId, playerData>
         this.remotePlayers = new Map();
         this.syncTimer = 0;
         this.pingTimer = 0;
@@ -27,11 +26,7 @@ export class P2PNetwork {
 
     encodeStr(str) {
         const bytes = new TextEncoder().encode(str);
-        const out = new Uint8Array(2 + bytes.length);
-        out[0] = (bytes.length >> 8) & 0xff;
-        out[1] = bytes.length & 0xff;
-        out.set(bytes, 2);
-        return out;
+        return Uint8Array.of((bytes.length >> 8) & 0xff, bytes.length & 0xff, ...bytes);
     }
 
     encodeRemainingLength(len) {
@@ -47,47 +42,26 @@ export class P2PNetwork {
 
     buildConnectPacket(clientId) {
         const proto = this.encodeStr('MQTT');
-        const versionAndFlags = new Uint8Array([0x04, 0x02, 0x00, 0x3c]); // MQTT 3.1.1, CleanSession, KeepAlive 60s
+        const flags = Uint8Array.of(0x04, 0x02, 0x00, 0x3c);
         const cid = this.encodeStr(clientId);
-        const bodyLen = proto.length + versionAndFlags.length + cid.length;
-        const remLen = this.encodeRemainingLength(bodyLen);
-
-        const pkt = new Uint8Array(1 + remLen.length + bodyLen);
-        pkt[0] = 0x10;
-        pkt.set(remLen, 1);
-        pkt.set(proto, 1 + remLen.length);
-        pkt.set(versionAndFlags, 1 + remLen.length + proto.length);
-        pkt.set(cid, 1 + remLen.length + proto.length + versionAndFlags.length);
-        return pkt;
+        const body = Uint8Array.of(...proto, ...flags, ...cid);
+        const rem = this.encodeRemainingLength(body.length);
+        return Uint8Array.of(0x10, ...rem, ...body);
     }
 
     buildSubscribePacket(topic) {
-        const topicBytes = this.encodeStr(topic);
-        const bodyLen = 2 + topicBytes.length + 1;
-        const remLen = this.encodeRemainingLength(bodyLen);
-
-        const pkt = new Uint8Array(1 + remLen.length + bodyLen);
-        pkt[0] = 0x82;
-        pkt.set(remLen, 1);
-        pkt[1 + remLen.length] = 0x00;
-        pkt[2 + remLen.length] = 0x01;
-        pkt.set(topicBytes, 3 + remLen.length);
-        pkt[3 + remLen.length + topicBytes.length] = 0x00;
-        return pkt;
+        const top = this.encodeStr(topic);
+        const body = Uint8Array.of(0x00, 0x01, ...top, 0x00);
+        const rem = this.encodeRemainingLength(body.length);
+        return Uint8Array.of(0x82, ...rem, ...body);
     }
 
     buildPublishPacket(topic, jsonStr) {
-        const topicBytes = this.encodeStr(topic);
-        const payloadBytes = new TextEncoder().encode(jsonStr);
-        const bodyLen = topicBytes.length + payloadBytes.length;
-        const remLen = this.encodeRemainingLength(bodyLen);
-
-        const pkt = new Uint8Array(1 + remLen.length + bodyLen);
-        pkt[0] = 0x30;
-        pkt.set(remLen, 1);
-        pkt.set(topicBytes, 1 + remLen.length);
-        pkt.set(payloadBytes, 1 + remLen.length + topicBytes.length);
-        return pkt;
+        const top = this.encodeStr(topic);
+        const pay = new TextEncoder().encode(jsonStr);
+        const body = Uint8Array.of(...top, ...pay);
+        const rem = this.encodeRemainingLength(body.length);
+        return Uint8Array.of(0x30, ...rem, ...body);
     }
 
     connect(roomCode, isHost = true) {
@@ -96,7 +70,6 @@ export class P2PNetwork {
         this.isHost = isHost;
         this.remotePlayers.clear();
 
-        // Локальный канал для мгновенной проверки в двух вкладках браузера
         if (typeof BroadcastChannel !== 'undefined') {
             this.localChannel = new BroadcastChannel(this.getTopic());
             this.localChannel.onmessage = (e) => {
@@ -112,6 +85,7 @@ export class P2PNetwork {
 
     disconnect() {
         this.isConnected = false;
+        this.roomCode = null;
         this.remotePlayers.clear();
         if (this.localChannel) {
             this.localChannel.close();
@@ -125,7 +99,7 @@ export class P2PNetwork {
     }
 
     connectToBroker() {
-        const url = this.brokers[this.brokerIndex % this.brokers.length];
+        const url = this.brokers.at(this.brokerIndex % this.brokers.length);
         this.statusText = `Подключение (${(this.brokerIndex % this.brokers.length) + 1}/${this.brokers.length})...`;
 
         try {
@@ -142,7 +116,7 @@ export class P2PNetwork {
             if (!this.isConnected) {
                 try { this.ws.close(); } catch {}
                 this.brokerIndex++;
-                if (this.brokerIndex < this.brokers.length * 2) {
+                if (this.brokerIndex <= this.brokers.length * 2) {
                     this.connectToBroker();
                 } else {
                     this.isConnected = true;
@@ -159,10 +133,9 @@ export class P2PNetwork {
         this.ws.onmessage = (event) => {
             const buf = new Uint8Array(event.data);
             if (!buf || buf.length < 2) return;
-            const packetType = buf[0] >> 4;
+            const packetType = buf.at(0) >> 4;
 
-            // CONNACK (подтверждение подключения)
-            if (packetType === 2 && buf[3] === 0) {
+            if (packetType === 2 && buf.at(3) === 0) {
                 clearTimeout(timeout);
                 this.isConnected = true;
                 this.statusText = `Онлайн [${this.roomCode}]`;
@@ -171,13 +144,12 @@ export class P2PNetwork {
                 return;
             }
 
-            // PUBLISH (входящее сообщение от игрока в комнате)
             if (packetType === 3) {
                 try {
                     let pos = 1;
-                    while (buf[pos] & 128) pos++;
+                    while (buf.at(pos) & 128) pos++;
                     pos++;
-                    const topicLen = (buf[pos] << 8) | buf[pos + 1];
+                    const topicLen = (buf.at(pos) << 8) | buf.at(pos + 1);
                     pos += 2 + topicLen;
                     const text = new TextDecoder().decode(buf.slice(pos));
                     const msg = JSON.parse(text);
@@ -215,7 +187,6 @@ export class P2PNetwork {
     }
     handlePacket(msg) {
         if (msg.type === 'hello') {
-            // Если мы хост — отправляем вошедшему игроку полное состояние мира (seed, постройки, ящики, время)
             if (this.isHost && this.callbacks.onRequestWorldSync) {
                 this.callbacks.onRequestWorldSync();
             }
@@ -289,7 +260,6 @@ export class P2PNetwork {
     update(dt, player, profile, username, entity) {
         if (!this.roomCode) return;
 
-        // Плавная интерполяция движения других игроков
         const now = Date.now();
         for (const [id, rp] of this.remotePlayers.entries()) {
             if (now - rp.lastSeen > 12000) {
@@ -300,7 +270,6 @@ export class P2PNetwork {
             rp.y += (rp.targetY - rp.y) * Math.min(1, 14 * dt);
         }
 
-        // Отправка своих координат и состояния фонарика (15 раз в секунду)
         this.syncTimer += dt;
         if (this.syncTimer >= 0.065) {
             this.syncTimer = 0;
@@ -314,7 +283,6 @@ export class P2PNetwork {
                 hp: Math.round(player.hp)
             });
 
-            // Хост транслирует координаты Сущности остальным игрокам
             if (this.isHost && entity) {
                 this.send('entity_sync', {
                     x: Math.round(entity.x),
@@ -325,12 +293,11 @@ export class P2PNetwork {
             }
         }
 
-        // MQTT PingReq каждые 25 сек, чтобы сокет не закрывался по таймауту
         this.pingTimer += dt;
         if (this.pingTimer >= 25) {
             this.pingTimer = 0;
             if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                this.ws.send(new Uint8Array([0xc0, 0x00]));
+                this.ws.send(Uint8Array.of(0xc0, 0x00));
             }
         }
     }
@@ -339,9 +306,8 @@ export class P2PNetwork {
         return Array.from(this.remotePlayers.values());
     }
 
-        drawRemotePlayers(ctx, localPlayer, lighting, world, building) {
+    drawRemotePlayers(ctx, localPlayer, lighting, world, building) {
         for (const rp of this.remotePlayers.values()) {
-            // Проверяем только отсутствие стены между игроками (чтобы напарник не пропадал на краю луча)
             const dx = rp.x - localPlayer.x;
             const dy = rp.y - localPlayer.y;
             const dist = Math.hypot(dx, dy);
@@ -378,7 +344,6 @@ export class P2PNetwork {
             ctx.restore();
         }
     }
-
 
     drawStatusHUD(ctx, width) {
         if (!this.roomCode) return;
