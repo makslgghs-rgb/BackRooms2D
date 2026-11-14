@@ -288,10 +288,12 @@ export class P2PNetwork {
                     x: Math.round(entity.x),
                     y: Math.round(entity.y),
                     angle: Number(entity.angle.toFixed(2)),
-                    state: entity.state
+                    state: entity.state,
+                    grabbedId: entity.grabbedPlayerId || null
                 });
             }
         }
+
 
         this.pingTimer += dt;
         if (this.pingTimer >= 25) {

@@ -108,11 +108,18 @@ const network = new P2PNetwork({
         lootBoxes.roomCache.clear();
         if (Array.isArray(msg.droppedItems)) droppedItems.items = msg.droppedItems;
     },
-    onReceiveEntity: (msg) => {
-        entity.x = msg.x;
-        entity.y = msg.y;
+        onReceiveEntity: (msg) => {
+        if (entity.targetX === undefined) {
+            entity.x = msg.x;
+            entity.y = msg.y;
+        }
+        entity.targetX = msg.x;
+        entity.targetY = msg.y;
         entity.angle = msg.angle;
-        if (entity.state !== 'GRAB') entity.state = msg.state;
+        if (entity.state !== 'GRAB') {
+            entity.state = msg.state;
+            entity.grabbedPlayerId = msg.grabbedId || null;
+        }
     },
     onStructureUpdate: (msg) => {
         if (msg.action === 'remove') {
@@ -376,6 +383,7 @@ function gameLoop(currentTime) {
 
     const isMultiplayer = network.remotePlayers.size !== 0;
     const paused = (menu.isOpen && !isMultiplayer) || struggle.isDead || interactables.isJournalOpen() || touchControls.editMode;
+    const roomPlayers = [player, ...network.getRemotePlayersList()];
 
     if (!paused) {
         gameTime.update(dt);
@@ -385,7 +393,7 @@ function gameLoop(currentTime) {
         equipment.update(dt);
         interactables.update(dt, player, building, crafting, entity);
         player.update(dt, input, world, building, lootBoxes, camera, canvas.width, canvas.height, struggle.active);
-        entity.update(dt, player, input, world, building, lighting, gameTime, struggle, network.isHost);
+        entity.update(dt, player, input, world, building, lighting, gameTime, struggle, network.isHost, roomPlayers, network.peerId);
         struggle.update(dt, player, entity, world, building);
         camera.update(dt, player, input, canvas.width, canvas.height);
         crosshair.update(dt, player, input);
@@ -409,10 +417,9 @@ function gameLoop(currentTime) {
     interactables.drawHint(ctx, player, building, inventory);
     building.drawPreview(ctx, input, player, world, lootBoxes, inventory, camera, canvas.width, canvas.height);
     
-    const allLitPlayers = [player, ...network.getRemotePlayersList()];
     const entityVisible = struggle.active || (
         entity.state !== 'DORMANT' &&
-        allLitPlayers.some(p => lighting.isPointVisible(entity.x, entity.y, p, world, building, gameTime))
+        roomPlayers.some(p => lighting.isPointVisible(entity.x, entity.y, p, world, building, gameTime))
     );
     if (entityVisible) {
         entity.draw(ctx);
@@ -422,12 +429,12 @@ function gameLoop(currentTime) {
     player.draw(ctx, prof.color, username);
     ctx.restore();
 
-    lighting.render(ctx, camera, world, building, allLitPlayers, gameTime, canvas.width, canvas.height);
+    lighting.render(ctx, camera, world, building, roomPlayers, gameTime, canvas.width, canvas.height);
 
     if (gfx.dust) {
         ctx.save();
         camera.apply(ctx, canvas.width, canvas.height, gfx.cameraMotion);
-        dust.draw(ctx, allLitPlayers, lighting, world, gameTime.isNight());
+        dust.draw(ctx, roomPlayers, lighting, world, gameTime.isNight());
         ctx.restore();
     }
 
@@ -443,20 +450,23 @@ function gameLoop(currentTime) {
     gameTime.drawHUD(ctx, uiW);
     saveSystem.drawStatus(ctx, uiW);
     network.drawStatusHUD(ctx, uiW);
-social.drawNotification(ctx, uiW);
-lootBoxes.drawNotification(ctx, uiW, uiH);
-buildHud.draw(ctx, inventory, building, uiW, uiH);
-crafting.draw(ctx, inventory, uiW, uiH);
-equipment.draw(ctx, player, inventory, prof, uiW, uiH);
-storage.draw(ctx, inventory, uiW, uiH);
-struggle.draw(ctx, uiW, uiH, touchControls.enabled);
-ctx.restore();
-if (!menu.isOpen) {
-touchControls.draw(ctx, canvas.width, canvas.height, struggle.active, struggle.isDead);
-if (!interactables.isJournalOpen() && !touchControls.enabled) {
-crosshair.draw(ctx, input, player);
+    social.drawNotification(ctx, uiW);
+    lootBoxes.drawNotification(ctx, uiW, uiH);
+    buildHud.draw(ctx, inventory, building, uiW, uiH);
+    crafting.draw(ctx, inventory, uiW, uiH);
+    equipment.draw(ctx, player, inventory, prof, uiW, uiH);
+    storage.draw(ctx, inventory, uiW, uiH);
+    struggle.draw(ctx, uiW, uiH, touchControls.enabled);
+    ctx.restore();
+
+    if (!menu.isOpen) {
+        touchControls.draw(ctx, canvas.width, canvas.height, struggle.active, struggle.isDead);
+        if (!interactables.isJournalOpen() && !touchControls.enabled) {
+            crosshair.draw(ctx, input, player);
+        }
+    }
+
+    requestAnimationFrame(gameLoop);
 }
-}
-requestAnimationFrame(gameLoop);
-}
+
 requestAnimationFrame(gameLoop);

@@ -4,6 +4,8 @@ export class BackroomsEntity {
     constructor(player) {
         this.x = player.x + 3000;
         this.y = player.y + 3000;
+        this.targetX = undefined;
+        this.targetY = undefined;
         this.angle = 0;
         this.radius = 18;
 
@@ -12,6 +14,7 @@ export class BackroomsEntity {
         this.timer = 14.0;
         this.attackCooldown = 0;
         this.animTime = 0;
+        this.grabbedPlayerId = null;
 
         this.path = [];
         this.pathTimer = 0;
@@ -28,11 +31,11 @@ export class BackroomsEntity {
         return Math.hypot(hit.x - x1, hit.y - y1) >= dist - 14;
     }
 
-    isInPlayerView(player, lighting) {
-        const angleToEntity = Math.atan2(this.y - player.y, this.x - player.x);
+    isInPlayerView(target, lighting) {
+        const angleToEntity = Math.atan2(this.y - target.y, this.x - target.x);
         const diff = Math.atan2(
-            Math.sin(angleToEntity - player.angle),
-            Math.cos(angleToEntity - player.angle)
+            Math.sin(angleToEntity - target.angle),
+            Math.cos(angleToEntity - target.angle)
         );
         return Math.abs(diff) <= lighting.eyeFov * 0.55;
     }
@@ -52,23 +55,24 @@ export class BackroomsEntity {
 
     onPlayerEscaped() {
         this.state = 'STUNNED';
+        this.grabbedPlayerId = null;
         this.timer = 3.2;
         this.path = [];
     }
 
-    spawnFarAway(player, world, building) {
+    spawnFarAway(target, world, building) {
         const ts = CONFIG.TILE_SIZE;
         const tactics = ['AMBUSH', 'FLANK', 'BACKSTAB'];
         this.tactic = tactics[Math.floor(Math.random() * tactics.length)];
 
-        let baseAngle = player.angle;
+        let baseAngle = target.angle;
         if (this.tactic === 'AMBUSH') {
-            baseAngle = player.angle + (Math.random() - 0.5) * 0.7;
+            baseAngle = target.angle + (Math.random() - 0.5) * 0.7;
         } else if (this.tactic === 'FLANK') {
             const side = Math.random() * 2 >= 1 ? 1 : -1;
-            baseAngle = player.angle + side * (Math.PI * 0.5) + (Math.random() - 0.5) * 0.5;
+            baseAngle = target.angle + side * (Math.PI * 0.5) + (Math.random() - 0.5) * 0.5;
         } else {
-            baseAngle = player.angle + Math.PI + (Math.random() - 0.5) * 0.8;
+            baseAngle = target.angle + Math.PI + (Math.random() - 0.5) * 0.8;
         }
 
         for (let attempt = 0; attempt !== 45; attempt++) {
@@ -76,8 +80,8 @@ export class BackroomsEntity {
             const angle = baseAngle + (Math.random() - 0.5) * spread;
             const dist = 760 + Math.random() * 380;
 
-            const wx = player.x + Math.cos(angle) * dist;
-            const wy = player.y + Math.sin(angle) * dist;
+            const wx = target.x + Math.cos(angle) * dist;
+            const wy = target.y + Math.sin(angle) * dist;
             const tx = Math.floor(wx / ts);
             const ty = Math.floor(wy / ts);
 
@@ -87,18 +91,18 @@ export class BackroomsEntity {
                 this.state = 'STALK';
                 this.timer = 18.0;
                 this.path = [];
-                this.ambushSpot = this.findAmbushCorner(player, world, building);
-                this.lastKnownPos = { x: player.x, y: player.y };
+                this.ambushSpot = this.findAmbushCorner(target, world, building);
+                this.lastKnownPos = { x: target.x, y: target.y };
                 return true;
             }
         }
         return false;
     }
 
-    findAmbushCorner(player, world, building) {
+    findAmbushCorner(target, world, building) {
         const ts = CONFIG.TILE_SIZE;
-        const aheadX = player.x + Math.cos(player.angle) * 340;
-        const aheadY = player.y + Math.sin(player.angle) * 340;
+        const aheadX = target.x + Math.cos(target.angle) * 340;
+        const aheadY = target.y + Math.sin(target.angle) * 340;
         const baseTx = Math.floor(aheadX / ts);
         const baseTy = Math.floor(aheadY / ts);
 
@@ -183,6 +187,7 @@ export class BackroomsEntity {
             }
         }
     }
+
     followPath(dt, speed, targetX, targetY, world, building) {
         this.pathTimer -= dt;
         if (this.pathTimer <= 0 || this.path.length === 0) {
@@ -226,8 +231,7 @@ export class BackroomsEntity {
         }
         return false;
     }
-
-        update(dt, player, input, world, building, lighting, gameTime, struggle, isHost = true) {
+    update(dt, player, input, world, building, lighting, gameTime, struggle, isHost = true, allPlayers = null, localPeerId = 'local') {
         this.animTime += dt;
         if (this.attackCooldown > 0) this.attackCooldown -= dt;
 
@@ -236,29 +240,50 @@ export class BackroomsEntity {
             if (this.afterimages[i].alpha <= 0) this.afterimages.splice(i, 1);
         }
 
-        // Если мы гость в P2P-комнате — ИИ монстра считает хост, а мы проверяем только захват себя
+        // На стороне гостя плавно интерполируем координаты монстра от хоста
         if (!isHost) {
+            if (this.targetX !== undefined && this.targetY !== undefined) {
+                this.x += (this.targetX - this.x) * Math.min(1, 16 * dt);
+                this.y += (this.targetY - this.y) * Math.min(1, 16 * dt);
+            }
+
             if (this.state === 'GRAB') {
-                this.x = player.x - Math.cos(this.angle) * 16;
-                this.y = player.y - Math.sin(this.angle) * 16;
-                if (!struggle.active) {
-                    this.state = 'CHASE';
+                if (this.grabbedPlayerId === localPeerId) {
+                    this.x = player.x - Math.cos(this.angle) * 16;
+                    this.y = player.y - Math.sin(this.angle) * 16;
+                    if (!struggle.active) {
+                        this.state = 'STUNNED';
+                        this.grabbedPlayerId = null;
+                    }
                 }
                 return;
             }
 
             const distToLocal = Math.hypot(player.x - this.x, player.y - this.y);
-            if (this.state === 'CHASE' && distToLocal <= this.radius + player.radius + 8 && this.attackCooldown <= 0) {
+            if ((this.state === 'CHASE' || this.state === 'STALK') && distToLocal <= this.radius + player.radius + 8 && this.attackCooldown <= 0) {
                 this.state = 'GRAB';
+                this.grabbedPlayerId = localPeerId;
                 this.attackCooldown = 2.5;
                 struggle.startGrab();
             }
             return;
         }
 
+        // Выбираем ближайшего живого игрока в комнате в качестве цели
+        const candidates = (Array.isArray(allPlayers) && allPlayers.length !== 0) ? allPlayers : [player];
+        let target = player;
+        let minTargetDist = Infinity;
+        for (const p of candidates) {
+            const d = Math.hypot(p.x - this.x, p.y - this.y);
+            if (d <= minTargetDist) {
+                minTargetDist = d;
+                target = p;
+            }
+        }
+
         if (this.state === 'DORMANT') {
             this.timer -= dt;
-            if (this.timer <= 0 && !this.spawnFarAway(player, world, building)) {
+            if (this.timer <= 0 && !this.spawnFarAway(target, world, building)) {
                 this.timer = 4.0;
             }
             return;
@@ -273,43 +298,52 @@ export class BackroomsEntity {
         }
 
         if (this.state === 'GRAB') {
-            this.x = player.x - Math.cos(this.angle) * 16;
-            this.y = player.y - Math.sin(this.angle) * 16;
-            if (!struggle.active) {
-                this.despawn(player, 35);
+            if (this.grabbedPlayerId === localPeerId) {
+                this.x = player.x - Math.cos(this.angle) * 16;
+                this.y = player.y - Math.sin(this.angle) * 16;
+                if (!struggle.active) {
+                    this.grabbedPlayerId = null;
+                    this.despawn(target, 35);
+                }
+            } else {
+                this.timer -= dt;
+                if (this.timer <= 0) {
+                    this.grabbedPlayerId = null;
+                    this.despawn(target, 35);
+                }
             }
             return;
         }
 
+        const isTargetLocal = target === player;
+        const dist = Math.hypot(target.x - this.x, target.y - this.y);
+        const canSeeTarget = this.hasLineOfSight(this.x, this.y, target.x, target.y, world, building, lighting);
+        const targetLookingAtMe = canSeeTarget && this.isInPlayerView(target, lighting);
 
-        const dist = Math.hypot(player.x - this.x, player.y - this.y);
-        const canSeePlayer = this.hasLineOfSight(this.x, this.y, player.x, player.y, world, building, lighting);
-        const playerLookingAtMe = canSeePlayer && this.isInPlayerView(player, lighting);
-
-        const { dx, dy } = input.getMovementVector();
+        const { dx, dy } = isTargetLocal ? input.getMovementVector() : { dx: 1, dy: 0 };
         const isMoving = Math.hypot(dx, dy) > 0;
-        const injuryBonus = player.hp <= 60 ? 90 : 0;
-        const noiseMult = player.equipment ? player.equipment.getNoiseMultiplier() : 1.0;
-        const noiseRadius = ((player.isSprinting ? 560 : (isMoving ? 210 : 45)) + injuryBonus) * noiseMult;
-        const heardPlayer = dist <= noiseRadius;
+        const injuryBonus = (target.hp ?? 100) <= 60 ? 90 : 0;
+        const noiseMult = (isTargetLocal && player.equipment) ? player.equipment.getNoiseMultiplier() : 1.0;
+        const noiseRadius = (((isTargetLocal && player.isSprinting) ? 560 : (isMoving ? 210 : 45)) + injuryBonus) * noiseMult;
+        const heardTarget = dist <= noiseRadius;
 
-        const hasLight = typeof player.hasAnyLight === 'function' ? player.hasAnyLight() : player.flashlightOn;
+        const hasLight = typeof target.hasAnyLight === 'function' ? target.hasAnyLight() : Boolean(target.flashlightOn);
         const sightRadius = hasLight ? 620 : (gameTime.isNight() ? 140 : 450);
-        const spottedPlayer = canSeePlayer && dist <= sightRadius;
+        const spottedTarget = canSeeTarget && dist <= sightRadius;
 
-        if (spottedPlayer || heardPlayer) {
-            this.lastKnownPos = { x: player.x, y: player.y };
+        if (spottedTarget || heardTarget) {
+            this.lastKnownPos = { x: target.x, y: target.y };
         }
 
         if (this.state === 'STALK') {
-            if (playerLookingAtMe && dist <= 480) {
+            if (targetLookingAtMe && dist <= 480) {
                 this.state = 'STARE';
                 this.timer = 1.1;
-                this.angle = Math.atan2(player.y - this.y, player.x - this.x);
+                this.angle = Math.atan2(target.y - this.y, target.x - this.x);
                 return;
             }
 
-            if (canSeePlayer && dist <= 145) {
+            if (canSeeTarget && dist <= 145) {
                 this.state = 'CHASE';
                 return;
             }
@@ -323,27 +357,27 @@ export class BackroomsEntity {
                     this.timer = 16.0;
                 }
             } else {
-                this.followPath(dt, 215 * dt, player.x, player.y, world, building);
+                this.followPath(dt, 215 * dt, target.x, target.y, world, building);
             }
         }
 
         else if (this.state === 'WAIT_AMBUSH') {
             this.timer -= dt;
-            this.angle = Math.atan2(player.y - this.y, player.x - this.x);
+            this.angle = Math.atan2(target.y - this.y, target.x - this.x);
 
-            if (playerLookingAtMe && dist <= 460) {
+            if (targetLookingAtMe && dist <= 460) {
                 this.state = 'STARE';
                 this.timer = 0.85;
-            } else if ((canSeePlayer && dist <= 210) || this.timer <= 0) {
+            } else if ((canSeeTarget && dist <= 210) || this.timer <= 0) {
                 this.state = 'CHASE';
             }
         }
 
         else if (this.state === 'STARE') {
-            this.angle = Math.atan2(player.y - this.y, player.x - this.x);
+            this.angle = Math.atan2(target.y - this.y, target.x - this.x);
             this.timer -= dt;
 
-            if (this.timer <= 0 || dist <= 145 || player.isSprinting) {
+            if (this.timer <= 0 || dist <= 145 || (isTargetLocal && player.isSprinting)) {
                 this.state = 'CHASE';
             }
         }
@@ -351,8 +385,8 @@ export class BackroomsEntity {
         else if (this.state === 'CHASE') {
             const chaseSpeed = (gameTime.isNight() ? 325 : 305) * dt;
 
-            if (spottedPlayer || heardPlayer) {
-                this.followPath(dt, chaseSpeed, player.x, player.y, world, building);
+            if (spottedTarget || heardTarget) {
+                this.followPath(dt, chaseSpeed, target.x, target.y, world, building);
             } else if (this.lastKnownPos) {
                 this.followPath(dt, chaseSpeed, this.lastKnownPos.x, this.lastKnownPos.y, world, building);
                 if (Math.hypot(this.lastKnownPos.x - this.x, this.lastKnownPos.y - this.y) <= 36) {
@@ -362,10 +396,17 @@ export class BackroomsEntity {
                 }
             }
 
-            if (dist <= this.radius + player.radius + 8 && this.attackCooldown <= 0) {
+            const targetRad = target.radius || 16;
+            if (dist <= this.radius + targetRad + 8 && this.attackCooldown <= 0) {
                 this.state = 'GRAB';
                 this.attackCooldown = 2.5;
-                struggle.startGrab();
+                if (isTargetLocal) {
+                    this.grabbedPlayerId = localPeerId;
+                    struggle.startGrab();
+                } else {
+                    this.grabbedPlayerId = target.id;
+                    this.timer = 7.5;
+                }
             }
         }
 
@@ -373,26 +414,27 @@ export class BackroomsEntity {
             this.timer -= dt;
             this.angle += Math.sin(this.animTime * 4) * 2.5 * dt;
 
-            if (spottedPlayer || heardPlayer) {
+            if (spottedTarget || heardTarget) {
                 this.state = 'CHASE';
                 return;
             }
 
             if (this.timer <= 0) {
-                this.despawn(player, 28 + Math.random() * 20);
+                this.despawn(target, 28 + Math.random() * 20);
             }
         }
     }
 
-    despawn(player, nextDelay) {
+    despawn(target, nextDelay) {
         this.state = 'DORMANT';
         this.timer = nextDelay;
+        this.grabbedPlayerId = null;
         this.path = [];
         this.afterimages = [];
         this.lastKnownPos = null;
         this.ambushSpot = null;
-        this.x = player.x + 3000;
-        this.y = player.y + 3000;
+        this.x = target.x + 3000;
+        this.y = target.y + 3000;
     }
 
     draw(ctx) {
