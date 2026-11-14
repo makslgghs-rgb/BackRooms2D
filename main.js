@@ -199,6 +199,7 @@ window.addEventListener('keydown', (e) => {
         if (!interactables.isJournalOpen()) menu.toggle();
     }
 });
+
 const actionCallbacks = {
     onToggleFlashlight: () => {
         if (!menu.isOpen && !struggle.active && !struggle.isDead && !interactables.isJournalOpen() && !storage.isOpen()) {

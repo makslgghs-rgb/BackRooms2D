@@ -18,6 +18,22 @@ export class FriendsNetwork {
         this.init();
     }
 
+    encodeStr(str) {
+        const bytes = new TextEncoder().encode(str);
+        return Uint8Array.of((bytes.length >> 8) & 0xff, bytes.length & 0xff, ...bytes);
+    }
+
+    encodeLen(len) {
+        const res = [];
+        do {
+            let b = len % 128;
+            len = Math.floor(len / 128);
+            if (len > 0) b |= 128;
+            res.push(b);
+        } while (len > 0);
+        return new Uint8Array(res);
+    }
+
     init() {
         if (typeof BroadcastChannel !== 'undefined') {
             this.localChannel = new BroadcastChannel(this.topic);
@@ -31,36 +47,32 @@ export class FriendsNetwork {
             this.ws.binaryType = 'arraybuffer';
 
             this.ws.onopen = () => {
-                const proto = new TextEncoder().encode('MQTT');
-                const cid = new TextEncoder().encode('br_soc_' + this.peerId);
-                const bodyLen = 2 + proto.length + 4 + 2 + cid.length;
-                const pkt = new Uint8Array(2 + bodyLen);
-                pkt[0] = 0x10; pkt[1] = bodyLen;
-                pkt[2] = 0; pkt[3] = proto.length; pkt.set(proto, 4);
-                pkt.set([0x04, 0x02, 0x00, 0x3c], 4 + proto.length);
-                pkt[8 + proto.length] = 0; pkt[9 + proto.length] = cid.length;
-                pkt.set(cid, 10 + proto.length);
-                this.ws.send(pkt);
+                const proto = this.encodeStr('MQTT');
+                const flags = Uint8Array.of(0x04, 0x02, 0x00, 0x3c);
+                const cid = this.encodeStr('br_soc_' + this.peerId);
+                const body = Uint8Array.of(...proto, ...flags, ...cid);
+                const rem = this.encodeLen(body.length);
+                this.ws.send(Uint8Array.of(0x10, ...rem, ...body));
             };
 
             this.ws.onmessage = (event) => {
                 const buf = new Uint8Array(event.data);
                 if (!buf || buf.length < 2) return;
-                const type = buf[0] >> 4;
-                if (type === 2 && buf[3] === 0) {
-                    const top = new TextEncoder().encode(this.topic);
-                    const bLen = 2 + 2 + top.length + 1;
-                    const sub = new Uint8Array(2 + bLen);
-                    sub[0] = 0x82; sub[1] = bLen; sub[2] = 0; sub[3] = 3;
-                    sub[4] = 0; sub[5] = top.length; sub.set(top, 6);
-                    this.ws.send(sub);
+                const firstByte = buf.at(0);
+                const type = firstByte >> 4;
+
+                if (type === 2 && buf.at(3) === 0) {
+                    const top = this.encodeStr(this.topic);
+                    const body = Uint8Array.of(0x00, 0x03, ...top, 0x00);
+                    const rem = this.encodeLen(body.length);
+                    this.ws.send(Uint8Array.of(0x82, ...rem, ...body));
                     this.announcePresence();
                 } else if (type === 3) {
                     try {
                         let pos = 1;
-                        while (buf[pos] & 128) pos++;
+                        while (buf.at(pos) & 128) pos++;
                         pos++;
-                        const tLen = (buf[pos] << 8) | buf[pos + 1];
+                        const tLen = (buf.at(pos) << 8) | buf.at(pos + 1);
                         pos += 2 + tLen;
                         const msg = JSON.parse(new TextDecoder().decode(buf.slice(pos)));
                         if (msg && msg.senderId !== this.peerId) this.handlePacket(msg);
@@ -75,7 +87,6 @@ export class FriendsNetwork {
             for (const [k, v] of this.onlineFriends.entries()) {
                 if (now - v.lastSeen > 15000) {
                     this.onlineFriends.delete(k);
-                    if (this.onUpdate) this.onUpdate(false);
                 }
             }
         }, 5000);
@@ -85,21 +96,15 @@ export class FriendsNetwork {
         const me = this.auth.getCurrentUsername();
         if (!me) return;
         const pkt = { senderId: this.peerId, from: me, roomCode: this.myCurrentRoom, ...data };
+
         if (this.localChannel) this.localChannel.postMessage(pkt);
+
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            const top = new TextEncoder().encode(this.topic);
+            const top = this.encodeStr(this.topic);
             const pay = new TextEncoder().encode(JSON.stringify(pkt));
-            const bLen = 2 + top.length + pay.length;
-            const rem = [];
-            let l = bLen;
-            do { let b = l % 128; l = Math.floor(l / 128); if (l > 0) b |= 128; rem.push(b); } while (l > 0);
-            const out = new Uint8Array(1 + rem.length + bLen);
-            out[0] = 0x30; out.set(rem, 1);
-            out[1 + rem.length] = (top.length >> 8) & 0xff;
-            out[2 + rem.length] = top.length & 0xff;
-            out.set(top, 3 + rem.length);
-            out.set(pay, 3 + rem.length + top.length);
-            this.ws.send(out);
+            const body = Uint8Array.of(...top, ...pay);
+            const rem = this.encodeLen(body.length);
+            this.ws.send(Uint8Array.of(0x30, ...rem, ...body));
         }
     }
 
@@ -119,8 +124,8 @@ export class FriendsNetwork {
         const idx = this.incomingRequests.findIndex(r => r.from.toLowerCase() === fromNick.toLowerCase());
         if (idx === -1) return;
         const removed = this.incomingRequests.splice(idx, 1);
-        const req = removed[0];
-        if (!req) return;
+        const req = removed.at(0);
+        if (!req || !req.from) return;
 
         if (!this.settings.data.friends.some(f => f.name.toLowerCase() === req.from.toLowerCase())) {
             this.settings.addFriend(req.from, req.roomCode || '');
@@ -141,17 +146,11 @@ export class FriendsNetwork {
         const myLower = me.toLowerCase();
 
         if (msg.type === 'presence' && msg.from) {
-            const key = msg.from.toLowerCase();
-            const prev = this.onlineFriends.get(key);
-            this.onlineFriends.set(key, {
+            this.onlineFriends.set(msg.from.toLowerCase(), {
                 username: msg.from,
                 roomCode: msg.roomCode,
                 lastSeen: Date.now()
             });
-            // Перерисовываем только если статус или комната друга реально изменились
-            if ((!prev || prev.roomCode !== msg.roomCode) && this.onUpdate) {
-                this.onUpdate(false);
-            }
             return;
         }
 
@@ -159,9 +158,9 @@ export class FriendsNetwork {
             const alreadyFriend = this.settings.data.friends.some(f => f.name.toLowerCase() === msg.from.toLowerCase());
             const alreadyReq = this.incomingRequests.some(r => r.from.toLowerCase() === msg.from.toLowerCase());
             if (!alreadyFriend && !alreadyReq) {
-                this.incomingRequests.push({ from: msg.from, roomCode: msg.roomCode });
+                this.incomingRequests.push({ from: msg.from, roomCode: msg.roomCode || '' });
                 this.showNote(`Запрос в друзья от ${msg.from}!`);
-                if (this.onUpdate) this.onUpdate(true);
+                if (this.onUpdate) this.onUpdate(false);
             }
             return;
         }
@@ -170,7 +169,7 @@ export class FriendsNetwork {
             if (!this.settings.data.friends.some(f => f.name.toLowerCase() === msg.from.toLowerCase())) {
                 this.settings.addFriend(msg.from, msg.roomCode || '');
                 this.showNote(`${msg.from} принял(а) заявку!`);
-                if (this.onUpdate) this.onUpdate(true);
+                if (this.onUpdate) this.onUpdate(false);
             }
         }
     }
