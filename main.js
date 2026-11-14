@@ -275,7 +275,11 @@ const actionCallbacks = {
         }
     },
     onPrimaryAction: () => {
-        if (menu.isOpen || struggle.active || struggle.isDead || interactables.isJournalOpen()) return;
+        if (struggle.isDead) {
+            location.reload();
+            return;
+        }
+        if (menu.isOpen || struggle.active || interactables.isJournalOpen()) return;
 
         const uiScale = settings.data.graphics.uiScale || 1.0;
         const uiMouseX = input.mouse.x / uiScale;
@@ -435,16 +439,16 @@ function gameLoop(currentTime) {
     gameTime.drawHUD(ctx, uiW);
     saveSystem.drawStatus(ctx, uiW);
     network.drawStatusHUD(ctx, uiW);
-    social.drawNotification(ctx, uiW);
-    lootBoxes.drawNotification(ctx, uiW, uiH);
+social.drawNotification(ctx, uiW);
+lootBoxes.drawNotification(ctx, uiW, uiH);
 buildHud.draw(ctx, inventory, building, uiW, uiH);
 crafting.draw(ctx, inventory, uiW, uiH);
 equipment.draw(ctx, player, inventory, prof, uiW, uiH);
 storage.draw(ctx, inventory, uiW, uiH);
-struggle.draw(ctx, uiW, uiH);
+struggle.draw(ctx, uiW, uiH, touchControls.enabled);
 ctx.restore();
 if (!menu.isOpen) {
-touchControls.draw(ctx, canvas.width, canvas.height, struggle.active);
+touchControls.draw(ctx, canvas.width, canvas.height, struggle.active, struggle.isDead);
 if (!interactables.isJournalOpen() && !touchControls.enabled) {
 crosshair.draw(ctx, input, player);
 }

@@ -136,7 +136,7 @@ export class StruggleSystem {
         }
     }
 
-    draw(ctx, width, height) {
+        draw(ctx, width, height, isTouch = false) {
         if (this.impactFlash > 0) {
             ctx.save();
             ctx.fillStyle = `rgba(180, 0, 0, ${this.impactFlash * 0.55})`;
@@ -145,7 +145,7 @@ export class StruggleSystem {
         }
 
         if (this.isDead) {
-            this.drawDeathScreen(ctx, width, height);
+            this.drawDeathScreen(ctx, width, height, isTouch);
             return;
         }
         if (!this.active) return;
@@ -187,7 +187,7 @@ export class StruggleSystem {
         ctx.restore();
     }
 
-    drawDeathScreen(ctx, width, height) {
+    drawDeathScreen(ctx, width, height, isTouch = false) {
         ctx.save();
         ctx.fillStyle = 'rgba(15, 0, 0, 0.88)';
         ctx.fillRect(0, 0, width, height);
@@ -199,7 +199,10 @@ export class StruggleSystem {
 
         ctx.font = '18px monospace';
         ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-        ctx.fillText('Нажми [ R ] чтобы начать заново', width / 2, height / 2 + 30);
+        const hint = isTouch
+            ? 'Нажми [ ИСП ] или [ ЗАНОВО ] чтобы начать заново'
+            : 'Нажми [ R ] чтобы начать заново';
+        ctx.fillText(hint, width / 2, height / 2 + 26);
         ctx.restore();
     }
 }

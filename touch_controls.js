@@ -5,7 +5,7 @@ export class TouchControls {
         this.callbacks = callbacks;
 
         this.enabled = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-        this.editMode = false; // Режим перетаскивания кнопок пальцем
+        this.editMode = false;
         this.dragTarget = null;
 
         this.storageKey = 'backrooms_touch_layout_v1';
@@ -52,7 +52,6 @@ export class TouchControls {
                 const x = t.clientX;
                 const y = t.clientY;
 
-                // Режим редактирования раскладки кнопок
                 if (this.editMode) {
                     if (x >= window.innerWidth / 2 - 90 && x <= window.innerWidth / 2 + 90 && y >= 20 && y <= 62) {
                         this.editMode = false;
@@ -76,7 +75,7 @@ export class TouchControls {
                     continue;
                 }
 
-                if (x < window.innerWidth * 0.45 && !this.stick.active) {
+                if (x <= window.innerWidth * 0.45 && !this.stick.active) {
                     this.stick.active = true;
                     this.stick.id = t.identifier;
                     this.stick.startX = x;
@@ -154,7 +153,20 @@ export class TouchControls {
         return this.enabled && this.sprintActive;
     }
 
-    buildLayout(width, height, struggleActive) {
+    buildLayout(width, height, struggleActive, isDead = false) {
+        if (isDead && !this.editMode) {
+            const sc = this.layout.scale || 1.0;
+            const r = Math.round(25 * sc);
+            const rightX = width - 32 - r;
+            const baseY = height - 125 - r;
+
+            this.buttons = [
+                { id: 'RESTART', label: 'ЗАНОВО', x: width / 2 - 95, y: height / 2 + 55, w: 190, h: 52, rect: true, color: '#ef4444' },
+                { id: 'ACT',     label: 'ИСП',    x: rightX - r, y: baseY - r, w: r * 2, h: r * 2, color: '#4ade80' }
+            ];
+            return;
+        }
+
         if (struggleActive && !this.editMode) {
             this.buttons = [
                 { id: 'SPACE', label: 'ВЫРВАТЬСЯ!', x: width / 2 - 95, y: height - 135, w: 190, h: 64, color: '#ef4444' }
@@ -169,7 +181,7 @@ export class TouchControls {
         const baseY = height - 125 - r;
 
         const defaults = [
-            { id: 'MENU',  label: 'МЕНЮ', x: width - 85, y: 96, w: Math.round(66 * sc), h: Math.round(30 * sc), rect: true },
+            { id: 'MENU',  label: 'МЕНЮ', x: width - 104, y: 112, w: 84, h: 38, rect: true, color: '#fef08a' },
             { id: 'ACT',   label: 'ИСП',  x: rightX - r, y: baseY - r, w: r * 2, h: r * 2, color: '#4ade80' },
             { id: 'USE',   label: 'E',    x: rightX - step - r, y: baseY - r, w: r * 2, h: r * 2, color: '#fef08a' },
             { id: 'SPRINT',label: 'БЕГ',  x: rightX - r, y: baseY - step - r, w: r * 2, h: r * 2, active: this.sprintActive },
@@ -191,13 +203,17 @@ export class TouchControls {
     }
 
     findButtonAt(x, y) {
+        const pad = 10;
         for (const b of this.buttons) {
-            if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
+            if (x >= b.x - pad && x <= b.x + b.w + pad && y >= b.y - pad && y <= b.y + b.h + pad) {
+                return b;
+            }
         }
         return null;
     }
 
     triggerButton(id) {
+        if (id === 'RESTART' && this.callbacks.onRestart) { this.callbacks.onRestart(); return; }
         if (id === 'SPRINT') { this.sprintActive = !this.sprintActive; return; }
         if (id === 'ACT' && this.callbacks.onPrimaryAction) this.callbacks.onPrimaryAction();
         if (id === 'USE' && this.callbacks.onInteract) this.callbacks.onInteract();
@@ -210,9 +226,9 @@ export class TouchControls {
         if (id === 'MENU' && this.callbacks.onMenu) this.callbacks.onMenu();
     }
 
-    draw(ctx, width, height, struggleActive = false) {
+    draw(ctx, width, height, struggleActive = false, isDead = false) {
         if (!this.enabled) return;
-        this.buildLayout(width, height, struggleActive);
+        this.buildLayout(width, height, struggleActive, isDead);
 
         ctx.save();
 
@@ -233,7 +249,7 @@ export class TouchControls {
                 ctx.beginPath();
                 ctx.arc(this.stick.startX + Math.cos(ang) * dist, this.stick.startY + Math.sin(ang) * dist, 20, 0, Math.PI * 2);
                 ctx.fill();
-            } else if (!struggleActive) {
+            } else if (!struggleActive && !isDead) {
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
                 ctx.lineWidth = 2;
                 ctx.beginPath();
