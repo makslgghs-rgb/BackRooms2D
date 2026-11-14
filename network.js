@@ -339,11 +339,17 @@ export class P2PNetwork {
         return Array.from(this.remotePlayers.values());
     }
 
-    drawRemotePlayers(ctx, localPlayer, lighting, world, building, gameTime) {
+        drawRemotePlayers(ctx, localPlayer, lighting, world, building) {
         for (const rp of this.remotePlayers.values()) {
-            // Скрываем напарников в тумане войны за стенами, если на них не падает свет
-            if (!lighting.isPointVisible(rp.x, rp.y, localPlayer, world, building, gameTime)) {
-                continue;
+            // Проверяем только отсутствие стены между игроками (чтобы напарник не пропадал на краю луча)
+            const dx = rp.x - localPlayer.x;
+            const dy = rp.y - localPlayer.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 16) {
+                const hit = lighting.castRay(localPlayer.x, localPlayer.y, Math.atan2(dy, dx), dist, world, building);
+                if (Math.hypot(hit.x - localPlayer.x, hit.y - localPlayer.y) < dist - 14) {
+                    continue;
+                }
             }
 
             ctx.save();
@@ -363,13 +369,16 @@ export class P2PNetwork {
             ctx.restore();
 
             ctx.save();
-            ctx.font = 'bold 11px monospace';
+            ctx.font = 'bold 12px monospace';
             ctx.textAlign = 'center';
             ctx.fillStyle = '#fef08a';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 4;
             ctx.fillText(rp.name, rp.x, rp.y - 24);
             ctx.restore();
         }
     }
+
 
     drawStatusHUD(ctx, width) {
         if (!this.roomCode) return;

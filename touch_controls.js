@@ -4,8 +4,12 @@ export class TouchControls {
         this.input = input;
         this.callbacks = callbacks;
 
-        // Автоматическое определение сенсорного устройства
         this.enabled = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        this.editMode = false; // Режим перетаскивания кнопок пальцем
+        this.dragTarget = null;
+
+        this.storageKey = 'backrooms_touch_layout_v1';
+        this.layout = this.loadLayout();
 
         this.stick = { active: false, id: null, startX: 0, startY: 0, currX: 0, currY: 0, maxR: 52 };
         this.aimTouch = { active: false, id: null };
@@ -15,9 +19,31 @@ export class TouchControls {
         this.bindEvents();
     }
 
+    loadLayout() {
+        try {
+            const saved = JSON.parse(localStorage.getItem(this.storageKey));
+            return saved && typeof saved === 'object' ? saved : { scale: 1.0, positions: {} };
+        } catch {
+            return { scale: 1.0, positions: {} };
+        }
+    }
+
+    saveLayout() {
+        localStorage.setItem(this.storageKey, JSON.stringify(this.layout));
+    }
+
+    resetLayout() {
+        this.layout = { scale: 1.0, positions: {} };
+        this.saveLayout();
+    }
+
+    startEditMode() {
+        this.enabled = true;
+        this.editMode = true;
+    }
+
     bindEvents() {
         window.addEventListener('touchstart', (e) => {
-            // Если пользователь коснулся экрана — гарантированно включаем мобильное управление
             this.enabled = true;
             if (e.target !== this.canvas) return;
             e.preventDefault();
@@ -26,14 +52,30 @@ export class TouchControls {
                 const x = t.clientX;
                 const y = t.clientY;
 
-                // 1. Проверяем попадание по виртуальным кнопкам
+                // Режим редактирования раскладки кнопок
+                if (this.editMode) {
+                    if (x >= window.innerWidth / 2 - 90 && x <= window.innerWidth / 2 + 90 && y >= 20 && y <= 62) {
+                        this.editMode = false;
+                        this.saveLayout();
+                        return;
+                    }
+                    if (x >= window.innerWidth / 2 - 90 && x <= window.innerWidth / 2 + 90 && y >= 70 && y <= 106) {
+                        this.resetLayout();
+                        return;
+                    }
+                    const btn = this.findButtonAt(x, y);
+                    if (btn) {
+                        this.dragTarget = { id: btn.id, touchId: t.identifier, offX: x - btn.x, offY: y - btn.y };
+                    }
+                    continue;
+                }
+
                 const btn = this.findButtonAt(x, y);
                 if (btn) {
                     this.triggerButton(btn.id);
                     continue;
                 }
 
-                // 2. Левая половина экрана — виртуальный стик движения
                 if (x < window.innerWidth * 0.45 && !this.stick.active) {
                     this.stick.active = true;
                     this.stick.id = t.identifier;
@@ -44,7 +86,6 @@ export class TouchControls {
                     continue;
                 }
 
-                // 3. Правая половина экрана — прицеливание и поворот взгляда
                 if (!this.aimTouch.active) {
                     this.aimTouch.active = true;
                     this.aimTouch.id = t.identifier;
@@ -59,6 +100,13 @@ export class TouchControls {
             e.preventDefault();
 
             for (const t of e.changedTouches) {
+                if (this.editMode && this.dragTarget && t.identifier === this.dragTarget.touchId) {
+                    const nx = Math.max(8, Math.min(window.innerWidth - 60, t.clientX - this.dragTarget.offX));
+                    const ny = Math.max(8, Math.min(window.innerHeight - 60, t.clientY - this.dragTarget.offY));
+                    this.layout.positions[this.dragTarget.id] = { x: nx, y: ny };
+                    continue;
+                }
+
                 if (this.stick.active && t.identifier === this.stick.id) {
                     this.stick.currX = t.clientX;
                     this.stick.currY = t.clientY;
@@ -71,6 +119,9 @@ export class TouchControls {
 
         const endTouch = (e) => {
             for (const t of e.changedTouches) {
+                if (this.dragTarget && t.identifier === this.dragTarget.touchId) {
+                    this.dragTarget = null;
+                }
                 if (this.stick.active && t.identifier === this.stick.id) {
                     this.stick.active = false;
                     this.stick.id = null;
@@ -85,13 +136,12 @@ export class TouchControls {
         window.addEventListener('touchend', endTouch);
         window.addEventListener('touchcancel', endTouch);
     }
-
     getMovementVector() {
-        if (!this.enabled || !this.stick.active) return { dx: 0, dy: 0 };
+        if (!this.enabled || this.editMode || !this.stick.active) return { dx: 0, dy: 0 };
         const rawDx = this.stick.currX - this.stick.startX;
         const rawDy = this.stick.currY - this.stick.startY;
         const dist = Math.hypot(rawDx, rawDy);
-        if (dist < 8) return { dx: 0, dy: 0 };
+        if (dist <= 8) return { dx: 0, dy: 0 };
 
         const clamped = Math.min(dist, this.stick.maxR) / this.stick.maxR;
         return {
@@ -105,28 +155,39 @@ export class TouchControls {
     }
 
     buildLayout(width, height, struggleActive) {
-        if (struggleActive) {
+        if (struggleActive && !this.editMode) {
             this.buttons = [
                 { id: 'SPACE', label: 'ВЫРВАТЬСЯ!', x: width / 2 - 95, y: height - 135, w: 190, h: 64, color: '#ef4444' }
             ];
             return;
         }
 
-        const r = 25;
-        const rightX = width - 48;
-        const baseY = height - 135;
+        const sc = this.layout.scale || 1.0;
+        const r = Math.round(25 * sc);
+        const step = Math.round(68 * sc);
+        const rightX = width - 32 - r;
+        const baseY = height - 125 - r;
 
-        this.buttons = [
-            { id: 'MENU',  label: 'МЕНЮ', x: width - 85, y: 72, w: 66, h: 30, rect: true },
+        const defaults = [
+            { id: 'MENU',  label: 'МЕНЮ', x: width - 85, y: 96, w: Math.round(66 * sc), h: Math.round(30 * sc), rect: true },
             { id: 'ACT',   label: 'ИСП',  x: rightX - r, y: baseY - r, w: r * 2, h: r * 2, color: '#4ade80' },
-            { id: 'USE',   label: 'E',    x: rightX - 68 - r, y: baseY - r, w: r * 2, h: r * 2, color: '#fef08a' },
-            { id: 'SPRINT',label: 'БЕГ',  x: rightX - r, y: baseY - 68 - r, w: r * 2, h: r * 2, active: this.sprintActive },
-            { id: 'LIGHT', label: 'СВЕТ', x: rightX - 68 - r, y: baseY - 68 - r, w: r * 2, h: r * 2 },
-            { id: 'BUILD', label: 'СТР',  x: rightX - 136 - r, y: baseY - r, w: r * 2, h: r * 2 },
-            { id: 'CRAFT', label: 'КРАФТ',x: rightX - 136 - r, y: baseY - 68 - r, w: r * 2, h: r * 2 },
-            { id: 'EQUIP', label: 'ШМОТ', x: rightX - 204 - r, y: baseY - 68 - r, w: r * 2, h: r * 2 },
-            { id: 'DROP',  label: 'ВЫБР', x: rightX - 204 - r, y: baseY - r, w: r * 2, h: r * 2 }
+            { id: 'USE',   label: 'E',    x: rightX - step - r, y: baseY - r, w: r * 2, h: r * 2, color: '#fef08a' },
+            { id: 'SPRINT',label: 'БЕГ',  x: rightX - r, y: baseY - step - r, w: r * 2, h: r * 2, active: this.sprintActive },
+            { id: 'LIGHT', label: 'СВЕТ', x: rightX - step - r, y: baseY - step - r, w: r * 2, h: r * 2 },
+            { id: 'BUILD', label: 'СТР',  x: rightX - step * 2 - r, y: baseY - r, w: r * 2, h: r * 2 },
+            { id: 'CRAFT', label: 'КРАФТ',x: rightX - step * 2 - r, y: baseY - step - r, w: r * 2, h: r * 2 },
+            { id: 'EQUIP', label: 'ШМОТ', x: rightX - step * 3 - r, y: baseY - step - r, w: r * 2, h: r * 2 },
+            { id: 'DROP',  label: 'ВЫБР', x: rightX - step * 3 - r, y: baseY - r, w: r * 2, h: r * 2 }
         ];
+
+        this.buttons = defaults.map(btn => {
+            const custom = this.layout.positions[btn.id];
+            if (custom) {
+                btn.x = Math.min(width - btn.w, custom.x);
+                btn.y = Math.min(height - btn.h, custom.y);
+            }
+            return btn;
+        });
     }
 
     findButtonAt(x, y) {
@@ -155,36 +216,37 @@ export class TouchControls {
 
         ctx.save();
 
-        // 1. Отрисовка левого джойстика движения
-        if (this.stick.active) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(this.stick.startX, this.stick.startY, this.stick.maxR, 0, Math.PI * 2);
-            ctx.stroke();
+        if (!this.editMode) {
+            if (this.stick.active) {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(this.stick.startX, this.stick.startY, this.stick.maxR, 0, Math.PI * 2);
+                ctx.stroke();
 
-            const dx = this.stick.currX - this.stick.startX;
-            const dy = this.stick.currY - this.stick.startY;
-            const dist = Math.min(Math.hypot(dx, dy), this.stick.maxR);
-            const ang = Math.atan2(dy, dx);
+                const dx = this.stick.currX - this.stick.startX;
+                const dy = this.stick.currY - this.stick.startY;
+                const dist = Math.min(Math.hypot(dx, dy), this.stick.maxR);
+                const ang = Math.atan2(dy, dx);
 
-            ctx.fillStyle = 'rgba(254, 240, 138, 0.55)';
-            ctx.beginPath();
-            ctx.arc(this.stick.startX + Math.cos(ang) * dist, this.stick.startY + Math.sin(ang) * dist, 20, 0, Math.PI * 2);
-            ctx.fill();
-        } else if (!struggleActive) {
-            // Подсказка зоны стика слева снизу
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(95, height - 140, 44, 0, Math.PI * 2);
-            ctx.stroke();
+                ctx.fillStyle = 'rgba(254, 240, 138, 0.55)';
+                ctx.beginPath();
+                ctx.arc(this.stick.startX + Math.cos(ang) * dist, this.stick.startY + Math.sin(ang) * dist, 20, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (!struggleActive) {
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(95, height - 140, 44, 0, Math.PI * 2);
+                ctx.stroke();
+            }
         }
 
-        // 2. Отрисовка кнопок действий справа
         for (const b of this.buttons) {
-            ctx.fillStyle = b.active ? 'rgba(74, 222, 128, 0.35)' : 'rgba(15, 14, 8, 0.65)';
-            ctx.strokeStyle = b.color || 'rgba(255, 255, 255, 0.45)';
+            ctx.fillStyle = this.editMode
+                ? 'rgba(254, 240, 138, 0.25)'
+                : (b.active ? 'rgba(74, 222, 128, 0.35)' : 'rgba(15, 14, 8, 0.65)');
+            ctx.strokeStyle = this.editMode ? '#fef08a' : (b.color || 'rgba(255, 255, 255, 0.45)');
             ctx.lineWidth = 2;
 
             if (b.rect) {
@@ -202,6 +264,21 @@ export class TouchControls {
             ctx.textBaseline = 'middle';
             ctx.fillStyle = b.color || '#ffffff';
             ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2);
+        }
+
+        if (this.editMode) {
+            ctx.fillStyle = '#4ade80';
+            ctx.fillRect(width / 2 - 90, 20, 180, 42);
+            ctx.fillStyle = '#000';
+            ctx.font = 'bold 14px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('СОХРАНИТЬ КНОПКИ', width / 2, 41);
+
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
+            ctx.fillRect(width / 2 - 90, 70, 180, 36);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px monospace';
+            ctx.fillText('СБРОС ПО УМОЛЧАНИЮ', width / 2, 88);
         }
 
         ctx.restore();

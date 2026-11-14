@@ -365,6 +365,11 @@ export class MainMenu {
                 <input type="checkbox" id="gfxCam" ${g.cameraMotion ? 'checked' : ''}>
             </div>
             <div class="vhs-row">
+                <span>Сенсорные кнопки (Телефон):</span>
+                <button class="vhs-btn secondary" id="btnEditTouch" style="padding:6px 12px;">ПЕРЕТАЩИТЬ КНОПКИ</button>
+            </div>
+
+            <div class="vhs-row">
                 <span>Качество теней (лучи):</span>
                 <select class="vhs-input" id="gfxRays">
                     <option value="95" ${g.rayCount === 95 ? 'selected' : ''}>Высокое (95)</option>
@@ -381,6 +386,14 @@ export class MainMenu {
             const panel = this.overlay.querySelector('.vhs-panel');
             if (panel) panel.style.transform = `scale(${g.uiScale})`;
         };
+        body.querySelector('#btnEditTouch').onclick = () => {
+            if (this.callbacks.onEditTouch) {
+                this.isOpen = false;
+                this.overlay.classList.add('hidden');
+                this.callbacks.onEditTouch();
+            }
+        };
+
         body.querySelector('#gfxVhs').onchange = (e) => { g.vhsEffect = e.target.checked; this.settings.save(); };
         body.querySelector('#gfxDust').onchange = (e) => { g.dust = e.target.checked; this.settings.save(); };
         body.querySelector('#gfxCam').onchange = (e) => { g.cameraMotion = e.target.checked; this.settings.save(); };

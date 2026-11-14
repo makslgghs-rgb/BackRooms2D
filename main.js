@@ -80,7 +80,6 @@ function resetNewWorld() {
     struggle.active = false;
 }
 
-// Настройка P2P-сети и обработчиков синхронизации мира
 const network = new P2PNetwork({
     onRequestWorldSync: () => {
         network.send('world_sync', {
@@ -156,6 +155,9 @@ const menu = new MainMenu(settings, auth, {
     onDeleteWorld: () => {
         saveSystem.deleteSave(auth.getCurrentUsername());
         resetNewWorld();
+    },
+    onEditTouch: () => {
+        touchControls.startEditMode();
     }
 });
 
@@ -347,7 +349,7 @@ function gameLoop(currentTime) {
     lighting.rayCount = gfx.rayCount;
 
     const isMultiplayer = network.remotePlayers.size !== 0;
-    const paused = (menu.isOpen && !isMultiplayer) || struggle.isDead || interactables.isJournalOpen();
+    const paused = (menu.isOpen && !isMultiplayer) || struggle.isDead || interactables.isJournalOpen() || touchControls.editMode;
 
     if (!paused) {
         gameTime.update(dt);
@@ -380,15 +382,19 @@ function gameLoop(currentTime) {
     interactables.drawHint(ctx, player, building, inventory);
     building.drawPreview(ctx, input, player, world, lootBoxes, inventory, camera, canvas.width, canvas.height);
     
-    if (struggle.active || lighting.isPointVisible(entity.x, entity.y, player, world, building, gameTime)) {
+    const allLitPlayers = [player, ...network.getRemotePlayersList()];
+    const entityVisible = struggle.active || (
+        entity.state !== 'DORMANT' &&
+        allLitPlayers.some(p => lighting.isPointVisible(entity.x, entity.y, p, world, building, gameTime))
+    );
+    if (entityVisible) {
         entity.draw(ctx);
     }
 
-    network.drawRemotePlayers(ctx, player, lighting, world, building, gameTime);
+    network.drawRemotePlayers(ctx, player, lighting, world, building);
     player.draw(ctx, prof.color, username);
     ctx.restore();
 
-    const allLitPlayers = [player, ...network.getRemotePlayersList()];
     lighting.render(ctx, camera, world, building, allLitPlayers, gameTime, canvas.width, canvas.height);
 
     if (gfx.dust) {
@@ -412,8 +418,8 @@ function gameLoop(currentTime) {
     network.drawStatusHUD(ctx, uiW);
     lootBoxes.drawNotification(ctx, uiW, uiH);
     buildHud.draw(ctx, inventory, building, uiW, uiH);
-    crafting.draw(ctx, inventory, uiW, uiH);
-    equipment.draw(ctx, player, inventory, prof, uiW, uiH);
+crafting.draw(ctx, inventory, uiW, uiH);
+equipment.draw(ctx, player, inventory, prof, uiW, uiH);
 storage.draw(ctx, inventory, uiW, uiH);
 struggle.draw(ctx, uiW, uiH);
 ctx.restore();
