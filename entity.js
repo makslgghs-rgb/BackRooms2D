@@ -241,29 +241,28 @@ export class BackroomsEntity {
         }
 
         // На стороне гостя плавно интерполируем координаты монстра от хоста
+        // На стороне гостя плавно интерполируем координаты монстра от хоста
         if (!isHost) {
             if (this.targetX !== undefined && this.targetY !== undefined) {
                 this.x += (this.targetX - this.x) * Math.min(1, 16 * dt);
                 this.y += (this.targetY - this.y) * Math.min(1, 16 * dt);
             }
 
-            if (this.state === 'GRAB') {
-                if (this.grabbedPlayerId === localPeerId) {
-                    this.x = player.x - Math.cos(this.angle) * 16;
-                    this.y = player.y - Math.sin(this.angle) * 16;
-                    if (!struggle.active) {
-                        this.state = 'STUNNED';
-                        this.grabbedPlayerId = null;
-                    }
-                }
+            if (struggle.active) {
+                this.state = 'GRAB';
+                this.x = player.x - Math.cos(this.angle) * 16;
+                this.y = player.y - Math.sin(this.angle) * 16;
                 return;
             }
 
             const distToLocal = Math.hypot(player.x - this.x, player.y - this.y);
-            if ((this.state === 'CHASE' || this.state === 'STALK') && distToLocal <= this.radius + player.radius + 8 && this.attackCooldown <= 0) {
+            const hostGrabbedMe = (this.state === 'GRAB' && this.grabbedPlayerId === localPeerId);
+            const closeAttack = (this.state === 'CHASE' || this.state === 'STALK' || this.state === 'GRAB') && distToLocal <= this.radius + player.radius + 14;
+
+            if ((hostGrabbedMe || closeAttack) && this.attackCooldown <= 0) {
                 this.state = 'GRAB';
                 this.grabbedPlayerId = localPeerId;
-                this.attackCooldown = 2.5;
+                this.attackCooldown = 4.0;
                 struggle.startGrab();
             }
             return;

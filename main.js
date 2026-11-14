@@ -116,7 +116,7 @@ const network = new P2PNetwork({
         entity.targetX = msg.x;
         entity.targetY = msg.y;
         entity.angle = msg.angle;
-        if (entity.state !== 'GRAB') {
+        if (!struggle.active) {
             entity.state = msg.state;
             entity.grabbedPlayerId = msg.grabbedId || null;
         }
