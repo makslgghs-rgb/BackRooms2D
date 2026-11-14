@@ -46,9 +46,9 @@ export class GameSettings {
         localStorage.setItem(this.prefix + this.activeUser, JSON.stringify(this.data));
     }
 
-    addFriend(name, code) {
-        if (!name.trim() || !code.trim()) return;
-        this.data.friends.push({ name: name.trim(), code: code.trim().toUpperCase() });
+    addFriend(name, code = '') {
+        if (!name || !name.trim()) return;
+        this.data.friends.push({ name: name.trim(), code: (code || '').trim().toUpperCase() });
         this.save();
     }
 

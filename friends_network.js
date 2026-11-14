@@ -9,8 +9,8 @@ export class FriendsNetwork {
         this.ws = null;
         this.localChannel = null;
 
-        this.incomingRequests = []; // [{ from: 'Ник', roomCode: 'BR-1234' }]
-        this.onlineFriends = new Map(); // Map<nickLower, { username, roomCode, lastSeen }>
+        this.incomingRequests = [];
+        this.onlineFriends = new Map();
         this.myCurrentRoom = null;
         this.statusNote = '';
         this.noteTimer = 0;
@@ -73,7 +73,10 @@ export class FriendsNetwork {
             this.announcePresence();
             const now = Date.now();
             for (const [k, v] of this.onlineFriends.entries()) {
-                if (now - v.lastSeen > 15000) this.onlineFriends.delete(k);
+                if (now - v.lastSeen > 15000) {
+                    this.onlineFriends.delete(k);
+                    if (this.onUpdate) this.onUpdate(false);
+                }
             }
         }, 5000);
     }
@@ -109,24 +112,27 @@ export class FriendsNetwork {
         const me = this.auth.getCurrentUsername();
         if (!clean || !me || clean.toLowerCase() === me.toLowerCase()) return;
         this.sendPacket({ type: 'friend_req', to: clean.toLowerCase() });
-        this.showNote(`Запрос отправлен игроку ${clean}`);
+        this.showNote(`Запрос отправлен: ${clean}`);
     }
 
     acceptRequest(fromNick) {
         const idx = this.incomingRequests.findIndex(r => r.from.toLowerCase() === fromNick.toLowerCase());
         if (idx === -1) return;
-        const req = this.incomingRequests.splice(idx, 1)[0];
+        const removed = this.incomingRequests.splice(idx, 1);
+        const req = removed[0];
+        if (!req) return;
 
         if (!this.settings.data.friends.some(f => f.name.toLowerCase() === req.from.toLowerCase())) {
             this.settings.addFriend(req.from, req.roomCode || '');
         }
         this.sendPacket({ type: 'friend_accept', to: req.from.toLowerCase() });
-        if (this.onUpdate) this.onUpdate();
+        this.showNote(`${req.from} добавлен(а) в друзья!`);
+        if (this.onUpdate) this.onUpdate(true);
     }
 
     declineRequest(fromNick) {
         this.incomingRequests = this.incomingRequests.filter(r => r.from.toLowerCase() !== fromNick.toLowerCase());
-        if (this.onUpdate) this.onUpdate();
+        if (this.onUpdate) this.onUpdate(true);
     }
 
     handlePacket(msg) {
@@ -135,12 +141,17 @@ export class FriendsNetwork {
         const myLower = me.toLowerCase();
 
         if (msg.type === 'presence' && msg.from) {
-            this.onlineFriends.set(msg.from.toLowerCase(), {
+            const key = msg.from.toLowerCase();
+            const prev = this.onlineFriends.get(key);
+            this.onlineFriends.set(key, {
                 username: msg.from,
                 roomCode: msg.roomCode,
                 lastSeen: Date.now()
             });
-            if (this.onUpdate) this.onUpdate();
+            // Перерисовываем только если статус или комната друга реально изменились
+            if ((!prev || prev.roomCode !== msg.roomCode) && this.onUpdate) {
+                this.onUpdate(false);
+            }
             return;
         }
 
@@ -150,7 +161,7 @@ export class FriendsNetwork {
             if (!alreadyFriend && !alreadyReq) {
                 this.incomingRequests.push({ from: msg.from, roomCode: msg.roomCode });
                 this.showNote(`Запрос в друзья от ${msg.from}!`);
-                if (this.onUpdate) this.onUpdate();
+                if (this.onUpdate) this.onUpdate(true);
             }
             return;
         }
@@ -158,8 +169,8 @@ export class FriendsNetwork {
         if (msg.type === 'friend_accept' && msg.to === myLower) {
             if (!this.settings.data.friends.some(f => f.name.toLowerCase() === msg.from.toLowerCase())) {
                 this.settings.addFriend(msg.from, msg.roomCode || '');
-                this.showNote(`${msg.from} принял(а) заявку в друзья!`);
-                if (this.onUpdate) this.onUpdate();
+                this.showNote(`${msg.from} принял(а) заявку!`);
+                if (this.onUpdate) this.onUpdate(true);
             }
         }
     }

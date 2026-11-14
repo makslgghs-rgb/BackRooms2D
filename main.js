@@ -132,8 +132,11 @@ const network = new P2PNetwork({
     }
 });
 
-const social = new FriendsNetwork(auth, settings, () => {
-    if (menu.isOpen) menu.render();
+const social = new FriendsNetwork(auth, settings, (force = false) => {
+    if (!menu.isOpen) return;
+    const activeTag = document.activeElement ? document.activeElement.tagName : '';
+    if (!force && (activeTag === 'INPUT' || activeTag === 'TEXTAREA')) return;
+    menu.render();
 });
 
 const menu = new MainMenu(settings, auth, {
