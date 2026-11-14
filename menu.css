@@ -1,0 +1,120 @@
+#mainMenuOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 7, 3, 0.86);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    font-family: monospace;
+    color: #f4f4f5;
+    cursor: default;
+}
+
+#mainMenuOverlay.hidden {
+    display: none;
+}
+
+.vhs-panel {
+    width: 560px;
+    max-width: 92vw;
+    background: rgba(18, 17, 10, 0.95);
+    border: 2px solid #8c8132;
+    box-shadow: 0 0 35px rgba(0, 0, 0, 0.9);
+    padding: 24px;
+}
+
+.vhs-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(212, 200, 106, 0.3);
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+}
+
+.vhs-title {
+    font-size: 22px;
+    font-weight: bold;
+    color: #fef08a;
+    letter-spacing: 2px;
+}
+
+.vhs-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 18px;
+}
+
+.vhs-tab {
+    flex: 1;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(212, 200, 106, 0.3);
+    color: #d4d4d8;
+    font-family: monospace;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.vhs-tab.active {
+    background: #8c8132;
+    color: #09090b;
+    border-color: #fef08a;
+}
+
+.vhs-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 210px;
+}
+
+.vhs-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vhs-btn {
+    padding: 10px 16px;
+    background: #8c8132;
+    color: #000;
+    border: none;
+    font-family: monospace;
+    font-weight: bold;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.vhs-btn:hover {
+    background: #d4c86a;
+}
+
+.vhs-btn.secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.vhs-input {
+    background: #09090b;
+    border: 1px solid #8c8132;
+    color: #fef08a;
+    padding: 8px 10px;
+    font-family: monospace;
+    font-size: 14px;
+}
+
+.friend-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.4);
+    border-left: 3px solid #fef08a;
+}
