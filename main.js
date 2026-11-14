@@ -26,6 +26,7 @@ import { StorageSystem } from './storage.js';
 import { SaveSystem } from './save_system.js';
 import { TouchControls } from './touch_controls.js';
 import { P2PNetwork } from './network.js';
+import { FriendsNetwork } from './friends_network.js';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -131,6 +132,10 @@ const network = new P2PNetwork({
     }
 });
 
+const social = new FriendsNetwork(auth, settings, () => {
+    if (menu.isOpen) menu.render();
+});
+
 const menu = new MainMenu(settings, auth, {
     hasSave: (user) => saveSystem.hasSave(user),
     onStartGame: (info) => {
@@ -138,16 +143,27 @@ const menu = new MainMenu(settings, auth, {
         if (info && info.mode === 'join') {
             resetNewWorld();
             network.connect(info.code, false);
+            social.myCurrentRoom = info.code;
+            social.announcePresence();
         } else {
             if (info && info.loadSave) {
                 saveSystem.load(user, getWorldState());
             } else if (!menu.hasStarted) {
                 resetNewWorld();
             }
+            const code = info?.code || menu.myRoomCode;
             if (!network.roomCode) {
-                network.connect(info?.code || menu.myRoomCode, true);
+                network.connect(code, true);
             }
+            social.myCurrentRoom = code;
+            social.announcePresence();
         }
+    },
+    onLeaveWorld: () => {
+        network.disconnect();
+        social.myCurrentRoom = null;
+        social.announcePresence();
+        resetNewWorld();
     },
     onSaveWorld: () => {
         if (network.isHost) saveSystem.save(auth.getCurrentUsername(), getWorldState(), false);
@@ -160,6 +176,8 @@ const menu = new MainMenu(settings, auth, {
         touchControls.startEditMode();
     }
 });
+
+menu.social = social;
 
 auth.onRegistryUpdated = () => {
     if (!auth.isLoggedIn() && menu.isOpen) {
@@ -366,6 +384,7 @@ function gameLoop(currentTime) {
         if (gfx.dust) dust.update(dt, camera);
     }
 
+    social.update(dt);
     network.update(dt, player, prof, username, entity);
 
     ctx.fillStyle = '#000';
@@ -416,8 +435,9 @@ function gameLoop(currentTime) {
     gameTime.drawHUD(ctx, uiW);
     saveSystem.drawStatus(ctx, uiW);
     network.drawStatusHUD(ctx, uiW);
+    social.drawNotification(ctx, uiW);
     lootBoxes.drawNotification(ctx, uiW, uiH);
-    buildHud.draw(ctx, inventory, building, uiW, uiH);
+buildHud.draw(ctx, inventory, building, uiW, uiH);
 crafting.draw(ctx, inventory, uiW, uiH);
 equipment.draw(ctx, player, inventory, prof, uiW, uiH);
 storage.draw(ctx, inventory, uiW, uiH);

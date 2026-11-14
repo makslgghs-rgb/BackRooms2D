@@ -38,16 +38,19 @@ export class MainMenu {
         }
     }
 
-    render() {
+        render() {
         if (!this.auth.isLoggedIn()) {
             this.renderAuthScreen();
             return;
         }
 
+        const reqCount = this.social ? this.social.incomingRequests.length : 0;
+        const friendsLabel = reqCount !== 0 ? `ДРУЗЬЯ (${reqCount})` : 'ДРУЗЬЯ';
+
         const tabs = [
             { id: 'lobby', label: 'ЛОББИ' },
             { id: 'profile', label: 'ПРОФИЛЬ' },
-            { id: 'friends', label: 'ДРУЗЬЯ' },
+            { id: 'friends', label: friendsLabel },
             { id: 'graphics', label: 'ГРАФИКА' }
         ];
 
@@ -194,6 +197,11 @@ export class MainMenu {
 
         body.innerHTML = `
             <button class="vhs-btn" id="btnPlaySolo">${mainBtnText}</button>
+            ${this.hasStarted ? `
+                <button class="vhs-btn secondary" id="btnLeaveWorld" style="color:#ef4444; border-color:#ef4444;">
+                    ВЫЙТИ ИЗ МИРА (В ЛОББИ)
+                </button>
+            ` : ''}
             ${(this.hasStarted || hasSave) ? `
                 <div style="display:flex; gap:8px;">
                     ${this.hasStarted ? `<button class="vhs-btn secondary" id="btnManualSave" style="flex:1; color:#4ade80;">СОХРАНИТЬ МИР</button>` : ''}
@@ -223,6 +231,15 @@ export class MainMenu {
             this.startGame({ mode: 'host', loadSave: !this.hasStarted && hasSave, code: this.myRoomCode });
         };
 
+        const btnLeave = body.querySelector('#btnLeaveWorld');
+        if (btnLeave) {
+            btnLeave.onclick = () => {
+                this.hasStarted = false;
+                if (this.callbacks.onLeaveWorld) this.callbacks.onLeaveWorld();
+                this.render();
+            };
+        }
+
         const btnSave = body.querySelector('#btnManualSave');
         if (btnSave) {
             btnSave.onclick = () => {
@@ -245,7 +262,6 @@ export class MainMenu {
             if (code) this.startGame({ mode: 'join', code });
         };
     }
-
 
 
     renderProfile(body) {
@@ -299,32 +315,63 @@ export class MainMenu {
 
     renderFriends(body) {
         const friends = this.settings.data.friends;
+        const requests = this.social ? this.social.incomingRequests : [];
+
         body.innerHTML = `
             <div class="vhs-row" style="gap:6px;">
-                <input class="vhs-input" id="frName" placeholder="Ник друга" style="width:38%;">
-                <input class="vhs-input" id="frCode" placeholder="Код (BR-XXXX)" style="width:36%;">
-                <button class="vhs-btn" id="btnAddFriend">+</button>
+                <input class="vhs-input" id="frName" placeholder="Введите ник друга..." style="width:78%;">
+                <button class="vhs-btn" id="btnAddFriend" style="width:20%;">+</button>
             </div>
-            <div style="display:flex; flex-direction:column; gap:6px; max-height:140px; overflow-y:auto;">
-                ${friends.length === 0 ? '<div style="color:#71717a;">Список друзей пуст</div>' : ''}
-                ${friends.map((f, i) => `
-                    <div class="friend-item">
-                        <span><strong>${f.name}</strong> (${f.code})</span>
+
+            ${requests.length !== 0 ? `
+                <div style="font-size:12px; color:#fef08a; margin-top:4px;">ВХОДЯЩИЕ ЗАЯВКИ В ДРУЗЬЯ:</div>
+                ${requests.map(r => `
+                    <div class="friend-item" style="border-left-color:#4ade80;">
+                        <span><strong>${r.from}</strong> хочет добавить вас</span>
                         <div style="display:flex; gap:6px;">
-                            <button class="vhs-btn secondary" data-connect="${f.code}" style="padding:4px 8px;">ВХОД</button>
-                            <button class="vhs-btn secondary" data-del="${i}" style="padding:4px 8px; color:#ef4444;">X</button>
+                            <button class="vhs-btn" data-acc="${r.from}" style="padding:4px 8px; font-size:11px;">ПРИНЯТЬ</button>
+                            <button class="vhs-btn secondary" data-dec="${r.from}" style="padding:4px 8px; font-size:11px; color:#ef4444;">ОТКЛОНИТЬ</button>
                         </div>
                     </div>
                 `).join('')}
+            ` : ''}
+
+            <div style="display:flex; flex-direction:column; gap:6px; max-height:140px; overflow-y:auto;">
+                ${friends.length === 0 ? '<div style="color:#71717a;">Список друзей пуст</div>' : ''}
+                ${friends.map((f, i) => {
+                    const online = this.social ? this.social.onlineFriends.get(f.name.toLowerCase()) : null;
+                    const room = online?.roomCode || f.code;
+                    return `
+                        <div class="friend-item">
+                            <span>
+                                <strong style="color:${online ? '#4ade80' : '#a1a1aa'};">●</strong>
+                                <strong>${f.name}</strong> ${room ? `(${room})` : '(в меню)'}
+                            </span>
+                            <div style="display:flex; gap:6px;">
+                                ${room ? `<button class="vhs-btn secondary" data-connect="${room}" style="padding:4px 8px;">ВХОД</button>` : ''}
+                                <button class="vhs-btn secondary" data-del="${i}" style="padding:4px 8px; color:#ef4444;">X</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
             </div>
         `;
 
         body.querySelector('#btnAddFriend').onclick = () => {
-            const n = body.querySelector('#frName').value;
-            const c = body.querySelector('#frCode').value;
-            this.settings.addFriend(n, c);
-            this.render();
+            const nick = body.querySelector('#frName').value.trim();
+            if (nick && this.social) {
+                this.social.sendFriendRequest(nick);
+                body.querySelector('#frName').value = '';
+            }
         };
+
+        body.querySelectorAll('[data-acc]').forEach(btn => {
+            btn.onclick = () => { if (this.social) this.social.acceptRequest(btn.dataset.acc); };
+        });
+
+        body.querySelectorAll('[data-dec]').forEach(btn => {
+            btn.onclick = () => { if (this.social) this.social.declineRequest(btn.dataset.dec); };
+        });
 
         body.querySelectorAll('[data-del]').forEach(btn => {
             btn.onclick = () => {
@@ -337,6 +384,7 @@ export class MainMenu {
             btn.onclick = () => this.startGame({ mode: 'join', code: btn.dataset.connect });
         });
     }
+
 
         renderGraphics(body) {
         const g = this.settings.data.graphics;
