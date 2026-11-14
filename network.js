@@ -2,6 +2,7 @@ export class P2PNetwork {
     constructor(callbacks = {}) {
         this.callbacks = callbacks;
         this.brokers = [
+            'wss://://hivemq.com',
             'wss://broker.emqx.io:8084/mqtt',
             'wss://test.mosquitto.org:8081/mqtt'
         ];
@@ -99,6 +100,7 @@ export class P2PNetwork {
     }
 
     connectToBroker() {
+        if (!this.roomCode) return;
         const url = this.brokers.at(this.brokerIndex % this.brokers.length);
         this.statusText = `Подключение (${(this.brokerIndex % this.brokers.length) + 1}/${this.brokers.length})...`;
 
@@ -106,25 +108,18 @@ export class P2PNetwork {
             this.ws = new WebSocket(url, 'mqtt');
             this.ws.binaryType = 'arraybuffer';
         } catch {
-            this.isConnected = true;
-            this.statusText = 'Локальная сеть';
-            this.send('hello', {});
+            this.brokerIndex++;
+            setTimeout(() => this.connectToBroker(), 1000);
             return;
         }
 
         const timeout = setTimeout(() => {
-            if (!this.isConnected) {
+            if (!this.isConnected && this.roomCode) {
                 try { this.ws.close(); } catch {}
                 this.brokerIndex++;
-                if (this.brokerIndex <= this.brokers.length * 2) {
-                    this.connectToBroker();
-                } else {
-                    this.isConnected = true;
-                    this.statusText = 'Локальная сеть';
-                    this.send('hello', {});
-                }
+                this.connectToBroker();
             }
-        }, 4000);
+        }, 2500);
 
         this.ws.onopen = () => {
             this.ws.send(this.buildConnectPacket('br2d_' + this.peerId));
@@ -160,11 +155,19 @@ export class P2PNetwork {
             }
         };
 
+        this.ws.onerror = () => {
+            clearTimeout(timeout);
+            if (!this.isConnected && this.roomCode) {
+                this.brokerIndex++;
+                setTimeout(() => this.connectToBroker(), 500);
+            }
+        };
+
         this.ws.onclose = () => {
             clearTimeout(timeout);
-            if (this.isConnected && this.roomCode) {
+            if (this.roomCode) {
                 this.isConnected = false;
-                setTimeout(() => this.connectToBroker(), 2500);
+                setTimeout(() => this.connectToBroker(), 1500);
             }
         };
     }
