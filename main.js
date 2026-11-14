@@ -159,6 +159,15 @@ const menu = new MainMenu(settings, auth, {
     }
 });
 
+auth.onRegistryUpdated = () => {
+    if (!auth.isLoggedIn() && menu.isOpen) {
+        const nickInput = document.getElementById('authNick');
+        if (nickInput && nickInput.value) {
+            nickInput.dispatchEvent(new Event('input'));
+        }
+    }
+};
+
 window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') {
         if (storage.isOpen()) { storage.close(); return; }
